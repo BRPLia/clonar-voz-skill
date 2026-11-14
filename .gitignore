@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+
+# Tu voz (NUNCA se sube)
+voces/*
+!voces/LEEME.txt
+
+# Audios generados
+salidas/*
+!salidas/LEEME.txt
+
+# Modelos descargados y configuración de este equipo
+modelos/
+config.json

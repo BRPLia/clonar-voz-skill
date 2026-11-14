@@ -1,0 +1,2 @@
+Aquí se guardan tus muestras de voz (un .wav y su .txt con lo que dices).
+Esta carpeta no se sube a ningún lado: tu voz se queda en tu computadora.

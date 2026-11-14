@@ -1,0 +1,2 @@
+Aquí aparecen las narraciones: una carpeta por guion, con narracion.wav,
+una frase por archivo e informe.json (tiempos y frases a revisar).

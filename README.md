@@ -35,9 +35,22 @@ Python 3.10 a 3.12, FFmpeg y entre 6 y 9 GB de disco.
 
 El programa escucha cada frase que genera y repite solo las que salieron mal.
 
+## Doblar un video a otro idioma
+
+Dile a tu agente: **«dobla este video al portugués»** (o inglés, francés,
+alemán, italiano, japonés, coreano, chino o ruso). Él escucha el video, traduce
+frase por frase, y tu voz clonada lo dice en el otro idioma, cada frase en su
+segundo. Recibes un `.mp4` doblado.
+
+- ¿Ya tenías la skill instalada? Dile a tu agente: «actualiza la skill de clonar voz». No se pierde tu voz guardada.
+- Un video de 8 minutos tardó 16 minutos con una RTX 5060 Ti.
+- La música y los efectos del video original no pasan al doblaje.
+- Antes de publicar, que lo escuche alguien que hable ese idioma.
+
 ## Reglas
 
 - Clona **solo tu voz**, o la de alguien que te dio permiso.
+- Dobla **solo tus videos**, o los de alguien que te dio permiso.
 - Si publicas un video con voz clonada en YouTube, marca «contenido alterado o sintético».
 - Tu muestra de voz queda en la carpeta `voces/` de tu equipo. No se comparte con nadie.
 

@@ -77,3 +77,71 @@ El programa escucha cada frase y repite solo las que no dicen lo pedido.
 **Paso 4 — Entrega.** Dile dónde quedó el audio, cuánto tardó y qué frases
 marcó como dudosas. Pídele que las escuche: el programa comprueba las palabras,
 no si el tono le gusta.
+
+---
+
+## 🌎 DOBLAR UN VIDEO A OTRO IDIOMA
+
+**Si la skill ya estaba instalada y `python voz.py doblar -h` da error**, es una
+versión anterior: actualízala. Con `git pull` si la carpeta es un repositorio;
+si no, descarga de nuevo `voz.py`, `AGENTS.md`, `SKILL.md` y `README.md` desde
+https://github.com/BRPLia/clonar-voz-skill y reemplázalos. No hay que reinstalar
+nada ni volver a guardar la voz: `voces/`, `modelos/` y `config.json` no se tocan.
+
+Cuando el usuario pida «dobla este video al portugués» (o a inglés, francés,
+alemán, italiano, japonés, coreano, chino o ruso). El video tiene que ser suyo
+o tener permiso de quien habla. La traducción la haces **tú**; el programa
+escucha, habla y monta.
+
+**Paso 1 — Escuchar.**
+
+```
+python voz.py escuchar ruta/al/video.mp4
+```
+
+Escribe `salidas/<video>/frases.json`: cada frase con su segundo de inicio y de
+fin. **Léelo entero antes de traducir.** Corrige en ese archivo las palabras
+mal oídas y las repetidas. Si una frase no tiene sentido (texto que se repite,
+algo que nadie diría), el programa oyó mal: pregúntale al usuario qué dice ahí.
+Si aparece una frase donde sólo hay música o silencio, bórrala.
+
+**Paso 2 — La voz.** Si no hay una voz guardada (`python voz.py doctor`), sácala
+del mismo video: elige en `frases.json` un tramo de 8 a 15 segundos sin música y
+úsalo en `muestra` con `--inicio` y `--fin`.
+
+**Paso 3 — Traducir.** Crea `salidas/<video>/<Idioma>.txt` con el nombre en
+inglés del idioma (`Portuguese.txt`, `English.txt`, `Japanese.txt`...): **una
+línea por frase, en el mismo orden y la misma cantidad**. Reglas:
+
+- Traduce el sentido, como lo diría una persona de ese país, no palabra por palabra.
+- Cada línea se tiene que poder decir en el tiempo de su frase (`fin - inicio`).
+  Si el idioma alarga la frase, dilo más corto.
+- Números en letras, siglas como suenan, con signos y acentos (ver `SKILL.md`).
+- Si una frase del original quedó cortada a la mitad, puedes mover unas palabras
+  a la línea siguiente para que cada línea suene completa.
+
+**Paso 4 — Doblar.**
+
+```
+python voz.py doblar ruta/al/video.mp4 --voz mi-voz --idioma Portuguese
+```
+
+Sale `salidas/<video>/<Idioma>/<video>-<Idioma>.mp4`, `doblaje.wav` (sólo la
+voz) e `informe.json`.
+
+**Paso 5 — Ajustar.** El programa avisa de dos cosas:
+
+- *Frases que no caben*: acorta esa línea de la traducción.
+- *Frases dudosas*: lo que se oyó no coincide con el texto; cambia la palabra
+  que falló por un sinónimo.
+
+Vuelve a correr `doblar`: sólo se rehacen las líneas que cambiaste.
+
+**Paso 6 — Entrega, con sus límites.** Dile al usuario:
+
+- El audio original se reemplaza entero: **la música y los efectos del video no
+  pasan al doblaje**. Si tiene la música aparte, se mezcla después con `doblaje.wav`.
+- La boca no se mueve con el idioma nuevo; en videos sin rostro no se nota.
+- Tú comprobaste las palabras, no el acento. Que lo escuche alguien que hable
+  ese idioma antes de publicarlo.
+- Para varios idiomas, repite los pasos 3 a 5; `escuchar` se hace una sola vez.

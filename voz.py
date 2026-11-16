@@ -4,6 +4,8 @@
     python voz.py doctor
     python voz.py muestra <audio o video> --nombre mi-voz [--inicio 12 --fin 24]
     python voz.py narrar <guion.txt> --voz mi-voz [--salida carpeta]
+    python voz.py escuchar <video>                 (escribe las frases con sus tiempos)
+    python voz.py doblar <video> --voz mi-voz --idioma Portuguese
 """
 import argparse
 import difflib
@@ -31,6 +33,9 @@ MUESTRA_MIN, MUESTRA_MAX = 5, 20      # segundos; lo ideal es de 8 a 15
 UMBRAL = 0.85                         # parecido mínimo entre lo pedido y lo que se oye
 REINTENTOS = 2
 PAUSA = 0.35                          # segundos de silencio entre frases
+FRASE_MAX = 12                        # segundos; al escuchar un video no se juntan frases más largas
+PAUSA_LARGA = 0.6                     # segundos; un silencio así dentro del video también corta la frase
+VELOCIDAD_MAX = 1.25                  # al doblar, lo más que se acelera una frase para que quepa
 
 
 def config():
@@ -42,7 +47,8 @@ def config():
 def normalizar(texto):
     texto = unicodedata.normalize("NFD", texto.lower())
     texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
-    return re.findall(r"[a-z0-9]+", texto)
+    # Palabras en alfabeto latino; en japonés, chino o coreano, letra por letra.
+    return re.findall(r"[a-z0-9]+|[^\W_]", texto)
 
 
 def parecido(pedido, oido):
@@ -83,6 +89,18 @@ class Oido:
                       generate_kwargs={"language": idioma.lower(), "task": "transcribe"})
         return r["text"].strip()
 
+    def con_tiempos(self, wav16):
+        """Palabras (inicio, fin, texto) de un audio largo a 16 kHz.
+
+        Va en trozos de 30 s y con tiempos por palabra: de corrido, en audios
+        largos deja de poner puntos y los tiempos se descuadran."""
+        import soundfile as sf
+        onda, sr = sf.read(wav16, dtype="float32")
+        r = self.pipe({"array": onda, "sampling_rate": sr}, chunk_length_s=30, return_timestamps="word",
+                      generate_kwargs={"task": "transcribe"})
+        return [(c["timestamp"][0], c["timestamp"][1] or c["timestamp"][0], c["text"].strip())
+                for c in r["chunks"] if c["text"].strip()]
+
 
 def cmd_doctor(args):
     print("ffmpeg:", shutil.which("ffmpeg") or "NO ENCONTRADO (hace falta para 'muestra')")
@@ -119,19 +137,12 @@ def cmd_muestra(args):
     print(f"Si hay una palabra mal, corrígela en {VOCES / (args.nombre + '.txt')} antes de narrar.")
 
 
-def cmd_narrar(args):
-    cfg = config()
-    wav_ref, txt_ref = VOCES / f"{args.voz}.wav", VOCES / f"{args.voz}.txt"
+def hablar(cfg, voz, frases, idioma):
+    """Dice cada frase con la voz guardada, la escucha y repite las que no salieron."""
+    wav_ref, txt_ref = VOCES / f"{voz}.wav", VOCES / f"{voz}.txt"
     if not wav_ref.exists() or not txt_ref.exists():
-        sys.exit(f"No existe la voz '{args.voz}'. Créala con:  python voz.py muestra <audio> --nombre {args.voz}")
-    frases = partir(Path(args.guion).read_text(encoding="utf-8-sig"))
-    if not frases:
-        sys.exit("El guion está vacío.")
-    salida = Path(args.salida or ROOT / "salidas" / Path(args.guion).stem)
-    salida.mkdir(parents=True, exist_ok=True)
-
+        sys.exit(f"No existe la voz '{voz}'. Créala con:  python voz.py muestra <audio> --nombre {voz}")
     import numpy as np
-    import soundfile as sf
     import torch
     from qwen_tts import Qwen3TTSModel
     gpu = cfg["device"].startswith("cuda")
@@ -148,7 +159,7 @@ def cmd_narrar(args):
         for i in range(0, len(indices), cfg["lote"]):
             grupo = indices[i:i + cfg["lote"]]
             wavs, sr = modelo.generate_voice_clone(
-                text=[frases[k] for k in grupo], language=[args.idioma] * len(grupo),
+                text=[frases[k] for k in grupo], language=[idioma] * len(grupo),
                 voice_clone_prompt=molde, max_new_tokens=1024)
             for k, w in zip(grupo, wavs):
                 yield k, np.asarray(w, dtype=np.float32)
@@ -162,7 +173,7 @@ def cmd_narrar(args):
     oido = Oido(cfg)
     informe = {}
     for k, w in audios.items():
-        oyo = oido(w, sr, args.idioma)
+        oyo = oido(w, sr, idioma)
         informe[k] = {"texto": frases[k], "oido": oyo, "parecido": round(parecido(frases[k], oyo), 2), "intentos": 1}
     for _ in range(REINTENTOS):
         malas = [k for k, f in informe.items() if f["parecido"] < UMBRAL]
@@ -170,12 +181,25 @@ def cmd_narrar(args):
             break
         print(f"Repitiendo {len(malas)} frase(s) que no salieron bien...", flush=True)
         for k, w in generar(malas):
-            oyo = oido(w, sr, args.idioma)
+            oyo = oido(w, sr, idioma)
             nota = round(parecido(frases[k], oyo), 2)
             informe[k]["intentos"] += 1
             if nota > informe[k]["parecido"]:
                 audios[k] = w
                 informe[k].update(oido=oyo, parecido=nota)
+    return audios, informe, sr, proceso
+
+
+def cmd_narrar(args):
+    cfg = config()
+    frases = partir(Path(args.guion).read_text(encoding="utf-8-sig"))
+    if not frases:
+        sys.exit("El guion está vacío.")
+    salida = Path(args.salida or ROOT / "salidas" / Path(args.guion).stem)
+    salida.mkdir(parents=True, exist_ok=True)
+    import numpy as np
+    import soundfile as sf
+    audios, informe, sr, proceso = hablar(cfg, args.voz, frases, args.idioma)
 
     silencio = np.zeros(int(sr * PAUSA), dtype=np.float32)
     partes = []
@@ -200,6 +224,102 @@ def cmd_narrar(args):
         print("Todas las frases dicen lo que pediste.")
 
 
+def cmd_escuchar(args):
+    cfg = config()
+    base = ROOT / "salidas" / Path(args.video).stem
+    base.mkdir(parents=True, exist_ok=True)
+    subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-i", args.video,
+                           "-vn", "-ac", "1", "-ar", "16000", str(base / "original.wav")])
+    # Una frase termina en un punto, en una pausa larga o al llegar a FRASE_MAX.
+    frases, abierta = [], False
+    for inicio, fin, palabra in Oido(cfg).con_tiempos(base / "original.wav"):
+        ultima = frases[-1] if frases else None
+        if abierta and inicio - ultima["fin"] <= PAUSA_LARGA and fin - ultima["inicio"] <= FRASE_MAX:
+            ultima.update(fin=round(fin, 2), texto=f"{ultima['texto']} {palabra}")
+        else:
+            frases.append({"n": len(frases) + 1, "inicio": round(inicio, 2), "fin": round(fin, 2), "texto": palabra})
+        abierta = palabra[-1] not in ".!?…。！？"
+    (base / "frases.json").write_text(json.dumps(frases, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"{len(frases)} frases en {base / 'frases.json'}")
+    print(f"Tradúcelas a {base / '<Idioma>.txt'} (por ejemplo Portuguese.txt): una línea por frase, en el mismo orden.")
+
+
+def cmd_doblar(args):
+    cfg = config()
+    base = ROOT / "salidas" / Path(args.video).stem
+    trad = base / f"{args.idioma}.txt"
+    if not (base / "frases.json").exists():
+        sys.exit(f"Primero:  python voz.py escuchar {args.video}")
+    if not trad.exists():
+        sys.exit(f"Falta la traducción: {trad} (una línea por frase).")
+    frases = json.loads((base / "frases.json").read_text(encoding="utf-8"))
+    lineas = [l.strip() for l in trad.read_text(encoding="utf-8-sig").splitlines() if l.strip()]
+    if len(lineas) != len(frases):
+        sys.exit(f"{trad.name} tiene {len(lineas)} líneas y el video tiene {len(frases)} frases. Tienen que coincidir.")
+    salida = base / args.idioma
+    (salida / "frases").mkdir(parents=True, exist_ok=True)
+    import numpy as np
+    import soundfile as sf
+
+    # Sólo se generan las frases nuevas o cuyo texto cambió desde la última vez.
+    previo = {}
+    if (salida / "informe.json").exists():
+        previo = {f["n"]: f for f in json.loads((salida / "informe.json").read_text(encoding="utf-8"))["frases"]}
+    wav = lambda n: salida / "frases" / f"{n:03d}.wav"
+    nuevas = [k for k in range(len(lineas))
+              if not wav(k + 1).exists() or previo.get(k + 1, {}).get("texto") != lineas[k]]
+    proceso = 0
+    if nuevas:
+        audios, inf, sr, proceso = hablar(cfg, args.voz, [lineas[k] for k in nuevas], args.idioma)
+        for i, k in enumerate(nuevas):
+            sf.write(wav(k + 1), audios[i], sr, subtype="PCM_16")
+            previo[k + 1] = inf[i]
+
+    # Cada frase va en su sitio. Si no cabe en su hueco se acelera un poco; si aun así no cabe, empuja a la siguiente.
+    total = sf.info(base / "original.wav").duration
+    pista, cursor, informe = None, 0.0, []
+    for k, f in enumerate(frases):
+        onda, sr = sf.read(wav(k + 1), dtype="float32")
+        tope = frases[k + 1]["inicio"] if k + 1 < len(frases) else total
+        # Si no cabe, primero empieza antes (en el silencio que dejó la anterior) y sólo después se acelera.
+        pos = max(cursor, min(f["inicio"], tope - len(onda) / sr))
+        hueco = tope - pos
+        velocidad = min(VELOCIDAD_MAX, max(1.0, len(onda) / sr / hueco))
+        if velocidad > 1.01:
+            tmp = salida / "frases" / "_ajuste.wav"
+            subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-i", str(wav(k + 1)),
+                                   "-filter:a", f"atempo={velocidad:.3f}", str(tmp)])
+            onda, sr = sf.read(tmp, dtype="float32")
+            tmp.unlink()
+        if pista is None:
+            pista = np.zeros(int((total + 30) * sr), dtype=np.float32)
+        a = int(pos * sr)
+        pista[a:a + len(onda)] = onda[:len(pista) - a]
+        cursor = pos + len(onda) / sr + 0.1
+        p = previo[k + 1]
+        informe.append(dict(n=k + 1, inicio=f["inicio"], hueco_s=round(hueco, 2), dura_s=round(len(onda) / sr, 2),
+                            velocidad=round(velocidad, 2), atraso_s=round(max(0, cursor - 0.1 - tope), 2),
+                            texto=p["texto"], oido=p["oido"], parecido=p["parecido"], intentos=p["intentos"]))
+    sf.write(salida / "doblaje.wav", pista[:int(max(total, cursor) * sr)], sr, subtype="PCM_16")
+    video = salida / f"{Path(args.video).stem}-{args.idioma}.mp4"
+    subprocess.check_call(["ffmpeg", "-v", "error", "-y", "-i", args.video, "-i", str(salida / "doblaje.wav"),
+                           "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(video)])
+
+    dudosas = [f["n"] for f in informe if f["parecido"] < UMBRAL]
+    atrasadas = [f["n"] for f in informe if f["atraso_s"] > 0.3]
+    (salida / "informe.json").write_text(json.dumps({
+        "voz": args.voz, "idioma": args.idioma, "modelo": cfg["model"], "equipo": cfg["equipo"],
+        "video_s": round(total, 1), "proceso_s": round(proceso, 1), "frases_generadas": len(nuevas),
+        "frases_dudosas": dudosas, "frases_atrasadas": atrasadas, "frases": informe,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\nListo: {video}  ({len(nuevas)} frases generadas en {proceso:.0f} s)")
+    if atrasadas:
+        print(f"Estas frases no caben en su hueco y pisan a la siguiente: {atrasadas}. "
+              "Acorta su traducción y vuelve a doblar: sólo se rehacen las que cambies.")
+    if dudosas:
+        print(f"Escucha estas frases, puede que una palabra no suene bien: {dudosas} (detalle en informe.json)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -217,6 +337,14 @@ def main():
     n.add_argument("--salida")
     n.add_argument("--idioma", default="Spanish")
     n.set_defaults(fn=cmd_narrar)
+    e = sub.add_parser("escuchar")
+    e.add_argument("video")
+    e.set_defaults(fn=cmd_escuchar)
+    d = sub.add_parser("doblar")
+    d.add_argument("video")
+    d.add_argument("--voz", required=True)
+    d.add_argument("--idioma", required=True)
+    d.set_defaults(fn=cmd_doblar)
     args = ap.parse_args()
     args.fn(args)
 

@@ -1,6 +1,6 @@
 ---
 name: clonar-voz
-description: Clona la voz del usuario en su computadora con Qwen3-TTS y narra guiones con ella, gratis y sin subir nada a internet. Úsala cuando pida clonar su voz, narrar un guion con su voz o generar una voz en off local.
+description: Clona la voz del usuario en su computadora con Qwen3-TTS y narra guiones con ella, gratis y sin subir nada a internet. También dobla sus videos a otro idioma con esa misma voz. Úsala cuando pida clonar su voz, narrar un guion con su voz, generar una voz en off local o doblar un video a otro idioma.
 ---
 
 # Clonar Voz — manual
@@ -18,6 +18,8 @@ cualquier texto con ese molde. No hay entrenamiento: el molde se hace en segundo
 | `python voz.py doctor` | Muestra modelo, equipo y voces guardadas. |
 | `python voz.py muestra <audio> --nombre X --inicio s --fin s` | Guarda una voz y transcribe su muestra. |
 | `python voz.py narrar <guion.txt> --voz X` | Narra el guion y revisa cada frase. |
+| `python voz.py escuchar <video>` | Anota las frases del video con sus tiempos. |
+| `python voz.py doblar <video> --voz X --idioma Portuguese` | Dobla el video con la traducción que escribió el agente. |
 
 `narrar` acepta `--idioma` (`Spanish`, `English`, `Portuguese`, `French`,
 `German`, `Italian`, `Japanese`, `Korean`, `Chinese`, `Russian`): la misma voz
@@ -63,7 +65,30 @@ minuto de audio):
 | Modelo chico, sin tarjeta, de una en una | 377 s | — |
 | Modelo grande, sin tarjeta, de una en una | 514 s | — |
 
+## Doblar un video a otro idioma
+`escuchar` anota las frases del video con sus tiempos; el agente las traduce a
+`salidas/<video>/<Idioma>.txt` (una línea por frase); `doblar` dice cada línea
+con la voz guardada, la coloca en su segundo y monta el video. Los pasos están
+en `AGENTS.md`.
+
+- **Cómo encaja cada frase.** Si la traducción dura más que su hueco, primero
+  empieza antes (en el silencio que dejó la frase anterior), después se acelera
+  hasta un 25 % y, si aun así no cabe, queda en `frases_atrasadas` del informe.
+- **Rehacer es barato.** `doblar` guarda cada frase; al repetirlo sólo genera
+  las líneas cuyo texto cambió.
+- **La revisión falla más en otros idiomas.** Marca como dudosas frases que
+  están bien: números escritos con letras («trinta e seis» / «36») y palabras
+  que suenan igual («peça» / «pesa»). En japonés, chino y coreano compara letra
+  por letra. Las dudosas son una lista para escuchar, no una lista de errores.
+- **Qué no hace.** No conserva la música ni los efectos del video (reemplaza
+  todo el audio) y no mueve la boca de quien habla.
+
+Medido en una RTX 5060 Ti de 16 GB con un video de 8 min 17 s (140 frases) al
+portugués: `escuchar` 2 min, `doblar` 14 min. Corregir 3 líneas y volver a
+doblar: 1 min.
+
 ## Límites
-- Sólo la voz del usuario o de quien le dio permiso.
+- Sólo la voz del usuario o de quien le dio permiso. Al doblar, sólo videos del
+  usuario o con permiso de quien habla.
 - Mac y tarjetas AMD: sin probar. Se instala el modo de procesador.
 - Al publicar en YouTube un video con voz clonada, marcar «contenido alterado o sintético».
